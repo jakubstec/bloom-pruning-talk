@@ -281,6 +281,9 @@
     margin: 0.7rem 0;
     color: var(--text);
   }
+  .defs { list-style: none; margin: 0.15rem 0 0.55rem; padding: 0; }
+  .defs li { color: var(--muted); font-size: 0.86rem; margin: 0.28rem 0; }
+  .defs b { color: var(--text); font-family: var(--mono); font-weight: 600; }
 
   /* ---------- alternatives table ---------- */
   table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.95rem; }
@@ -425,7 +428,6 @@
     <div class="title-meta reveal d4">
       <div><b>Jakub Stec</b>Author</div>
       <div><b>Dr Henryk Telega</b>Supervisor</div>
-      <div><b>Companion topic</b>ANS compression (Filip)</div>
     </div>
   </div>
 </section>
@@ -435,23 +437,19 @@
   <div class="inner">
     <div class="kicker reveal">01 · The problem</div>
     <h2 class="reveal d1">The fastest block to read<br>is the one you <span class="no">never read</span>.</h2>
-    <p class="lead reveal d2">Columnar formats (Parquet, ORC, DuckDB, ClickHouse) split tables into blocks and keep <b>min/max</b> per block. A query skips a block if the value can't be inside the range. That works on sorted data, and fails on shuffled data.</p>
+    <p class="lead reveal d2">A table is stored in blocks. Each block remembers the smallest and largest value it holds, and a query skips a block when the value can't fall inside that range.</p>
 
     <div class="reveal d3" style="margin-top:1.8rem; display:flex; align-items:center; flex-wrap:wrap; gap:0.6rem">
       <span class="query-pill">WHERE user_id = <span class="maybe">501</span></span>
       <div class="toggle" id="rg-toggle">
-        <button class="active" data-mode="minmax">min/max only</button>
-        <button data-mode="bloom">+ Bloom filter</button>
+        <button class="active" data-mode="sorted">Sorted</button>
+        <button data-mode="shuffled">Shuffled</button>
+        <button data-mode="bloom">Shuffled + Bloom</button>
       </div>
     </div>
 
     <div class="rg-row reveal d3" id="rg-row"></div>
-
-    <div class="grid g3 reveal d4">
-      <div class="card"><h3>Block = row group</h3><p>Parquet row group, ORC stripe, ClickHouse granule. The unit that can be skipped as a whole.</p></div>
-      <div class="card"><h3>Min/max is weak here</h3><p>High-cardinality columns that are not sorted: every block covers almost the full range.</p></div>
-      <div class="card"><h3>Real effect</h3><p>DuckDB example, value absent but inside min/max: <span class="mono" style="color:var(--text)">0.1 s → 0.002 s</span> with a 47-byte filter per row group.</p></div>
-    </div>
+    <p class="lead reveal d4" id="rg-caption" style="margin-top:0.4rem"></p>
   </div>
 </section>
 
@@ -480,7 +478,13 @@
           <h3>Why it is safe for pruning</h3>
           <p>Bits are only ever set, never cleared, so <b class="no">no false negatives</b>. A false positive only costs one unnecessary read; the query result stays correct.</p>
           <div class="formula">bits/key ≈ 1.44 · log₂(1/ε)</div>
-          <p>≈ <b style="color:var(--text)">10 bits per key</b> for a 1% false-positive rate, about 7 hashes. That is 44% above the theoretical minimum.</p>
+          <p>The formula only says how many bits to set aside per value.</p>
+          <ul class="defs">
+            <li><b>ε</b> allowed false-positive rate. 0.01 means 1%.</li>
+            <li><b>log₂(1/ε)</b> how many hashes. Each one halves the chance of a mistake.</li>
+            <li><b>1.44</b> bits of space per hash, so about half the bits stay 0. It is 1 / ln 2.</li>
+          </ul>
+          <p>At 1%: 6.6 × 1.44 ≈ <b style="color:var(--text)">10 bits per key</b>. The minimum is 6.6; Bloom uses 44% more.</p>
         </div>
         <div class="card" style="margin-top:1rem">
           <h3>In Parquet today</h3>
@@ -644,32 +648,50 @@
   }
 
   // row groups demo
-  const groups = [
-    { name: 'RG 1', min: 0, max: 900, has: false },
-    { name: 'RG 2', min: 0, max: 900, has: false },
-    { name: 'RG 3', min: 0, max: 900, has: true },
-    { name: 'RG 4', min: 0, max: 900, has: false },
-    { name: 'RG 5', min: 0, max: 900, has: false },
-    { name: 'RG 6', min: 0, max: 900, fp: true },
-    { name: 'RG 7', min: 0, max: 900, has: false },
-    { name: 'RG 8', min: 0, max: 900, has: false },
+  const sortedBlocks = [
+    { name: 'Block 1', min: 0, max: 112 },
+    { name: 'Block 2', min: 113, max: 225 },
+    { name: 'Block 3', min: 226, max: 338 },
+    { name: 'Block 4', min: 339, max: 450 },
+    { name: 'Block 5', min: 451, max: 563, has: true },
+    { name: 'Block 6', min: 564, max: 675 },
+    { name: 'Block 7', min: 676, max: 788 },
+    { name: 'Block 8', min: 789, max: 900 },
   ];
+  const shuffledBlocks = [
+    { name: 'Block 1', min: 0, max: 900 },
+    { name: 'Block 2', min: 0, max: 900 },
+    { name: 'Block 3', min: 0, max: 900, has: true },
+    { name: 'Block 4', min: 0, max: 900 },
+    { name: 'Block 5', min: 0, max: 900 },
+    { name: 'Block 6', min: 0, max: 900, fp: true },
+    { name: 'Block 7', min: 0, max: 900 },
+    { name: 'Block 8', min: 0, max: 900 },
+  ];
+  const captions = {
+    sorted: 'The column is sorted, so each block covers a small range. 501 can sit in only one of them, and min/max skips the other seven.',
+    shuffled: 'The same values are mixed. Every block now spans 0–900, so 501 falls inside every range and min/max skips nothing.',
+    bloom: 'A Bloom filter on each block still answers “definitely not” for most of them. One false alarm gets read anyway. In a DuckDB example this took the query from 0.1 s to 0.002 s.',
+  };
   const rgRow = document.getElementById('rg-row');
+  const rgCaption = document.getElementById('rg-caption');
   function renderGroups(mode) {
+    const blocks = mode === 'sorted' ? sortedBlocks : shuffledBlocks;
     rgRow.innerHTML = '';
-    groups.forEach(g => {
+    blocks.forEach(g => {
       const d = document.createElement('div');
       let verdict, cls;
-      if (mode === 'minmax') { verdict = 'read'; cls = 'read'; }
-      else if (g.has) { verdict = 'read'; cls = 'read'; }
-      else if (g.fp) { verdict = 'read (false +)'; cls = 'read'; }
-      else { verdict = 'skip'; cls = 'skip'; }
+      const outside = mode === 'sorted' && !g.has;
+      if (outside || (mode === 'bloom' && !g.has && !g.fp)) { verdict = 'skip'; cls = 'skip'; }
+      else if (mode === 'bloom' && g.fp) { verdict = 'read (false +)'; cls = 'read'; }
+      else { verdict = 'read'; cls = 'read'; }
       d.className = 'rg ' + cls;
       d.innerHTML = `<div class="name">${g.name}</div>min ${g.min}<br>max ${g.max}<div class="verdict ${cls === 'skip' ? 'no' : 'maybe'}">${verdict}</div>`;
       rgRow.appendChild(d);
     });
+    rgCaption.textContent = captions[mode];
   }
-  renderGroups('minmax');
+  renderGroups('sorted');
   document.querySelectorAll('#rg-toggle button').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('#rg-toggle button').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
