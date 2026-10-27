@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bloom Filters for Database Block Pruning</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12151c;
+    --panel-2: #181c25;
+    --line: #262b37;
+    --text: #e8eaf0;
+    --muted: #8b92a5;
+    --dim: #5a6175;
+    --no: #34d3a6;
+    --maybe: #f5b84a;
+    --accent: #7c8cff;
+    --red: #ff6b7a;
+    --sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html {
+    scroll-snap-type: y mandatory;
+    scroll-behavior: smooth;
+    background: var(--bg);
+  }
+
+  body {
+    font-family: var(--sans);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+
+  .slide {
+    min-height: 100vh;
+    scroll-snap-align: start;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 7vh 8vw;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .slide::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 85% 15%, rgba(124, 140, 255, 0.08), transparent 40%),
+      radial-gradient(circle at 10% 90%, rgba(52, 211, 166, 0.05), transparent 40%);
+    pointer-events: none;
+  }
+
+  .inner { position: relative; max-width: 1200px; width: 100%; margin: 0 auto; }
+
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 1.2rem;
+  }
+
+  h1 {
+    font-size: clamp(2.4rem, 5vw, 4.4rem);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    font-weight: 700;
+  }
+
+  h2 {
+    font-size: clamp(1.9rem, 3.4vw, 3rem);
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+    margin-bottom: 1.2rem;
+  }
+
+  .lead {
+    font-size: clamp(1.05rem, 1.5vw, 1.3rem);
+    color: var(--muted);
+    max-width: 52rem;
+  }
+
+  .no { color: var(--no); }
+  .maybe { color: var(--maybe); }
+  .acc { color: var(--accent); }
+  .mono { font-family: var(--mono); }
+
+  .grid { display: grid; gap: 1.2rem; }
+  .g2 { grid-template-columns: 1fr 1fr; }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 1.4rem 1.5rem;
+  }
+
+  .card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .card p, .card li { color: var(--muted); font-size: 0.97rem; }
+  .card ul { padding-left: 1.1rem; }
+  .card li { margin: 0.3rem 0; }
+
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.7s ease, transform 0.7s ease; }
+  .visible .reveal { opacity: 1; transform: none; }
+  .visible .reveal.d1 { transition-delay: 0.12s; }
+  .visible .reveal.d2 { transition-delay: 0.24s; }
+  .visible .reveal.d3 { transition-delay: 0.36s; }
+  .visible .reveal.d4 { transition-delay: 0.48s; }
+
+  /* ---------- title ---------- */
+  .title-meta {
+    margin-top: 3rem;
+    display: flex;
+    gap: 2.5rem;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+  .title-meta b { display: block; color: var(--text); font-weight: 600; }
+
+  .bits-deco {
+    display: grid;
+    grid-template-columns: repeat(32, 1fr);
+    gap: 5px;
+    margin-top: 3.5rem;
+    max-width: 760px;
+  }
+  .bits-deco span {
+    aspect-ratio: 1;
+    border-radius: 3px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+  }
+  .bits-deco span.on { background: var(--accent); border-color: var(--accent); opacity: 0.85; }
+
+  /* ---------- row groups ---------- */
+  .rg-row { display: flex; gap: 0.8rem; flex-wrap: wrap; margin: 1.8rem 0 1.4rem; }
+  .rg {
+    flex: 1 1 0;
+    min-width: 92px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 0.8rem;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--muted);
+    transition: all 0.4s ease;
+  }
+  .rg .name { color: var(--text); font-weight: 600; margin-bottom: 0.4rem; }
+  .rg.skip { border-color: var(--no); background: rgba(52, 211, 166, 0.08); }
+  .rg.read { border-color: var(--maybe); background: rgba(245, 184, 74, 0.08); }
+  .rg .verdict { margin-top: 0.5rem; font-weight: 600; }
+
+  .query-pill {
+    display: inline-block;
+    font-family: var(--mono);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.45rem 1rem;
+    font-size: 0.95rem;
+  }
+
+  .toggle {
+    display: inline-flex;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px;
+    margin-left: 1rem;
+  }
+  .toggle button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font: 600 0.85rem var(--sans);
+    padding: 0.45rem 1rem;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .toggle button.active { background: var(--accent); color: #0b0d12; }
+
+  /* ---------- bloom demo ---------- */
+  .demo { display: grid; grid-template-columns: 1.25fr 1fr; gap: 2rem; align-items: start; margin-top: 1rem; }
+  .bitarray {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 6px;
+    margin: 1rem 0 0.6rem;
+  }
+  .bit {
+    aspect-ratio: 1;
+    border-radius: 6px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: 500 0.7rem var(--mono);
+    color: var(--dim);
+    transition: all 0.3s ease;
+  }
+  .bit.on { background: var(--accent); border-color: var(--accent); color: #0b0d12; }
+  .bit.probe-hit { box-shadow: 0 0 0 3px var(--maybe); }
+  .bit.probe-miss { box-shadow: 0 0 0 3px var(--no); }
+  .bit { flex-direction: column; line-height: 1.1; }
+  .bit small { font-size: 0.55rem; opacity: 0.55; }
+
+  .controls { display: flex; gap: 0.6rem; margin-top: 1.2rem; flex-wrap: wrap; }
+  .controls input {
+    flex: 1;
+    min-width: 140px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.7rem 0.9rem;
+    color: var(--text);
+    font: 0.95rem var(--mono);
+    outline: none;
+  }
+  .controls input:focus { border-color: var(--accent); }
+  .btn {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    font: 600 0.9rem var(--sans);
+    padding: 0.7rem 1.1rem;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #0b0d12; border-color: var(--accent); }
+
+  .result {
+    margin-top: 1rem;
+    min-height: 3.2rem;
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    padding: 0.8rem 1rem;
+    border-radius: 10px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .result.no { border-color: var(--no); color: var(--no); }
+  .result.maybe { border-color: var(--maybe); color: var(--maybe); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.8rem; }
+  .chip {
+    font: 0.78rem var(--mono);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.2rem 0.65rem;
+    color: var(--muted);
+  }
+
+  .formula {
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    background: var(--panel-2);
+    border-radius: 10px;
+    padding: 0.8rem 1rem;
+    margin: 0.7rem 0;
+    color: var(--text);
+  }
+
+  /* ---------- alternatives table ---------- */
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.95rem; }
+  th {
+    text-align: left;
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid var(--line);
+  }
+  td { padding: 0.85rem 0.8rem; border-bottom: 1px solid var(--line); color: var(--muted); vertical-align: top; }
+  td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+  td.num { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+  tr.baseline td { background: rgba(124, 140, 255, 0.06); }
+  tr.range td:first-child { color: var(--maybe); }
+  .tag {
+    display: inline-block;
+    font: 600 0.68rem var(--mono);
+    padding: 0.15rem 0.5rem;
+    border-radius: 6px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+  }
+  .tag.prod { background: rgba(52, 211, 166, 0.14); color: var(--no); }
+  .tag.study { background: rgba(124, 140, 255, 0.16); color: var(--accent); }
+  .footnote { margin-top: 1rem; font-size: 0.78rem; color: var(--dim); }
+
+  /* ---------- trade-off ---------- */
+  .scale { display: grid; grid-template-columns: 1fr auto 1fr; gap: 1.5rem; align-items: stretch; margin-top: 1.6rem; }
+  .vs { align-self: center; font: 700 1.3rem var(--mono); color: var(--dim); }
+  .tier { display: flex; align-items: center; gap: 1rem; padding: 0.8rem 0; border-bottom: 1px dashed var(--line); }
+  .tier:last-child { border-bottom: none; }
+  .tier .bar { height: 10px; border-radius: 99px; background: var(--no); flex-shrink: 0; }
+  .tier .label { flex: 1; }
+  .tier .label b { display: block; color: var(--text); font-weight: 600; }
+  .tier .label span { color: var(--muted); font-size: 0.88rem; }
+  .quote {
+    margin-top: 1.6rem;
+    border-left: 3px solid var(--accent);
+    padding: 0.4rem 0 0.4rem 1.2rem;
+    font-size: 1.1rem;
+    color: var(--text);
+    max-width: 60rem;
+  }
+
+  /* ---------- plan ---------- */
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-top: 1.6rem; }
+  .step { display: flex; flex-direction: column; }
+  .step .n {
+    font: 700 0.8rem var(--mono);
+    color: var(--accent);
+    margin-bottom: 0.6rem;
+  }
+  .step .card { flex: 1; }
+
+  /* ---------- hypotheses ---------- */
+  .hyp { display: flex; gap: 1rem; align-items: baseline; padding: 0.75rem 0; border-bottom: 1px solid var(--line); }
+  .hyp .id { font: 700 0.85rem var(--mono); color: var(--maybe); min-width: 2.2rem; }
+  .hyp p { color: var(--muted); }
+  .hyp p b { color: var(--text); font-weight: 600; }
+
+  .out { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.8rem; }
+  .out span {
+    font-size: 0.85rem;
+    color: var(--muted);
+    border: 1px dashed var(--line);
+    border-radius: 999px;
+    padding: 0.3rem 0.8rem;
+    text-decoration: line-through;
+    text-decoration-color: var(--dim);
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+  .split .card h3 { display: flex; justify-content: space-between; }
+  .split .card h3 small { font: 500 0.75rem var(--mono); color: var(--dim); }
+
+  /* ---------- chrome ---------- */
+  .progress {
+    position: fixed;
+    top: 0; left: 0;
+    height: 3px;
+    background: var(--accent);
+    z-index: 20;
+    transition: width 0.3s ease;
+  }
+  .counter {
+    position: fixed;
+    right: 1.6rem;
+    bottom: 1.3rem;
+    font: 0.8rem var(--mono);
+    color: var(--dim);
+    z-index: 20;
+  }
+  .hint {
+    position: fixed;
+    left: 1.6rem;
+    bottom: 1.3rem;
+    font: 0.75rem var(--mono);
+    color: var(--dim);
+    z-index: 20;
+  }
+  .hint kbd {
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.05rem 0.35rem;
+    color: var(--muted);
+  }
+
+  .notes {
+    position: fixed;
+    left: 50%;
+    bottom: 1rem;
+    transform: translateX(-50%) translateY(140%);
+    width: min(900px, 92vw);
+    background: rgba(18, 21, 28, 0.97);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1rem 1.3rem;
+    font-size: 0.95rem;
+    color: var(--text);
+    z-index: 30;
+    transition: transform 0.35s ease;
+    backdrop-filter: blur(8px);
+  }
+  .notes.open { transform: translateX(-50%) translateY(0); }
+  .notes .t { font: 600 0.7rem var(--mono); letter-spacing: 0.15em; color: var(--maybe); margin-bottom: 0.4rem; }
+  .speaker { display: none; }
+
+  @media (max-height: 780px) {
+    .slide { padding: 4vh 6vw; }
+    h2 { margin-bottom: 0.8rem; }
+    .card { padding: 1rem 1.2rem; }
+    td { padding: 0.6rem 0.8rem; }
+  }
+
+  @media (max-width: 900px) {
+    .g2, .g3, .demo, .scale, .steps, .split { grid-template-columns: 1fr; }
+    .vs { justify-self: center; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress" id="progress"></div>
+<div class="counter" id="counter">1 / 7</div>
+<div class="hint"><kbd>↓</kbd> <kbd>↑</kbd> navigate &nbsp; <kbd>N</kbd> notes</div>
+<div class="notes" id="notes"><div class="t">SPEAKER NOTES</div><div id="notes-body"></div></div>
+
+<!-- 1. TITLE -->
+<section class="slide" id="s1" data-title="Title">
+  <div class="inner">
+    <div class="kicker reveal">Research topic · preliminary</div>
+    <h1 class="reveal d1">Efficient Database Query Filtering<br>with <span class="acc">Bloom Filters</span> and Modern<br>Probabilistic Data Structures</h1>
+    <p class="lead reveal d2" style="margin-top:1.4rem">Investigating memory–performance trade-offs of Bloom filters and alternative approximate membership structures for database block pruning.</p>
+    <div class="bits-deco reveal d3" id="deco"></div>
+    <div class="title-meta reveal d4">
+      <div><b>Jakub Stec</b>Author</div>
+      <div><b>Dr Henryk Telega</b>Supervisor</div>
+      <div><b>Companion topic</b>ANS compression (Filip)</div>
+    </div>
+  </div>
+  <div class="speaker">
+    Hi. My topic is about making analytical queries skip data they don't need. Specifically: how much memory we should spend on small probabilistic filters, like Bloom filters, so that a database can avoid reading whole blocks of a table. This is a preliminary study. Today I'll show the problem, how the structures work, what exactly the trade-off is, and the plan.
+  </div>
+</section>
+
+<!-- 2. PROBLEM -->
+<section class="slide" id="s2" data-title="Problem">
+  <div class="inner">
+    <div class="kicker reveal">01 · The problem</div>
+    <h2 class="reveal d1">The fastest block to read<br>is the one you <span class="no">never read</span>.</h2>
+    <p class="lead reveal d2">Columnar formats (Parquet, ORC, DuckDB, ClickHouse) split tables into blocks and keep <b>min/max</b> per block. A query skips a block if the value can't be inside the range. That works on sorted data, and fails on shuffled data.</p>
+
+    <div class="reveal d3" style="margin-top:1.8rem; display:flex; align-items:center; flex-wrap:wrap; gap:0.6rem">
+      <span class="query-pill">WHERE user_id = <span class="maybe">501</span></span>
+      <div class="toggle" id="rg-toggle">
+        <button class="active" data-mode="minmax">min/max only</button>
+        <button data-mode="bloom">+ Bloom filter</button>
+      </div>
+    </div>
+
+    <div class="rg-row reveal d3" id="rg-row"></div>
+
+    <div class="grid g3 reveal d4">
+      <div class="card"><h3>Block = row group</h3><p>Parquet row group, ORC stripe, ClickHouse granule. The unit that can be skipped as a whole.</p></div>
+      <div class="card"><h3>Min/max is weak here</h3><p>High-cardinality columns that are not sorted: every block covers almost the full range.</p></div>
+      <div class="card"><h3>Real effect</h3><p>DuckDB example, value absent but inside min/max: <span class="mono" style="color:var(--text)">0.1 s → 0.002 s</span> with a 47-byte filter per row group.</p></div>
+    </div>
+  </div>
+  <div class="speaker">
+    Analytical databases store data in blocks, for example row groups in Parquet. For every block they keep the minimum and maximum value. If I look for user 501 and a block's range is 600 to 900, I skip it without reading. But if the column is shuffled, every block has a range like 0 to 900, so min/max says "maybe" everywhere and we read everything. [click toggle] With a Bloom filter per block, most blocks answer "definitely not here" and we skip them. In a DuckDB example this took a query from 0.1 seconds to 2 milliseconds.
+  </div>
+</section>
+
+<!-- 3. BLOOM -->
+<section class="slide" id="s3" data-title="Bloom filter">
+  <div class="inner">
+    <div class="kicker reveal">02 · How a Bloom filter works</div>
+    <h2 class="reveal d1">A bit array that answers <span class="no">“definitely no”</span><br>or <span class="maybe">“probably yes”</span>.</h2>
+
+    <div class="demo">
+      <div class="reveal d2">
+        <p class="lead" style="font-size:1rem">Insert: hash the key with <b>k = 3</b> functions, set those bits. Query: if any bit is 0, the key was never inserted.</p>
+        <div class="bitarray" id="bits"></div>
+        <div class="controls">
+          <input id="key" placeholder="type a value, e.g. 501" autocomplete="off">
+          <button class="btn primary" id="ins">Insert</button>
+          <button class="btn" id="qry">Query</button>
+          <button class="btn" id="rst">Reset</button>
+        </div>
+        <div class="result" id="result">Block contains: try querying a value.</div>
+        <div class="chips" id="chips"></div>
+      </div>
+
+      <div class="reveal d3">
+        <div class="card">
+          <h3>Why it is safe for pruning</h3>
+          <p>Bits are only ever set, never cleared, so <b class="no">no false negatives</b>. A false positive only costs one unnecessary read; the query result stays correct.</p>
+          <div class="formula">bits/key ≈ 1.44 · log₂(1/ε)</div>
+          <p>≈ <b style="color:var(--text)">10 bits per key</b> for a 1% false-positive rate, about 7 hashes. That is 44% above the theoretical minimum.</p>
+        </div>
+        <div class="card" style="margin-top:1rem">
+          <h3>In Parquet today</h3>
+          <p><b style="color:var(--text)">Split Block Bloom Filter</b>: one per column chunk, 256-bit blocks, 8 bits set via XXH64, one cache line per probe. Used by DuckDB, Impala, Spark, ClickHouse.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="speaker">
+    A Bloom filter is just an array of bits and a few hash functions. To insert a value I hash it k times and set those bits. To check a value, I look at the same bits: if any of them is zero, the value is definitely not in the block. If all are one, it's probably there. Let me show it. [query 501: definitely not; query 500: probably yes; query 64: false positive, an extra read but still a correct answer] Because bits are never cleared, there are no false negatives, which is exactly what pruning needs. The cost is about ten bits per value for one percent false positives. Parquet uses a cache-friendly variant called the split block Bloom filter.
+  </div>
+</section>
+
+<!-- 4. ALTERNATIVES -->
+<section class="slide" id="s4" data-title="Alternatives">
+  <div class="inner">
+    <div class="kicker reveal">03 · Modern alternatives</div>
+    <h2 class="reveal d1">Bloom isn't the only filter. Newer ones<br>trade <span class="acc">build cost</span> for <span class="acc">space</span>.</h2>
+
+    <table class="reveal d2">
+      <thead>
+        <tr><th>Structure</th><th>Space (bits / key)</th><th>Idea</th><th>Fit for per-block filters</th></tr>
+      </thead>
+      <tbody>
+        <tr class="baseline"><td>Bloom / SBBF <span class="tag prod">PRODUCTION</span></td><td class="num">≈ 10 @ 1%</td><td>k bits in an array; blocked = one cache line</td><td>Cheap build, cheap probe. The baseline.</td></tr>
+        <tr><td>Cuckoo</td><td class="num">log₂(1/ε) + ~3</td><td>Fingerprints in two candidate buckets</td><td>Supports delete, which immutable blocks don't need.</td></tr>
+        <tr><td>XOR <span class="tag study">STUDY</span></td><td class="num">9.84 @ 0.39%</td><td>3 slots XOR to the key's fingerprint</td><td>Static, smaller; build is more expensive.</td></tr>
+        <tr><td>Binary fuse <span class="tag study">STUDY</span></td><td class="num">≈ 9.0 @ 0.39%</td><td>XOR with segmented, local hashing</td><td>Main candidate vs Bloom. Gains shrink on small sets.</td></tr>
+        <tr><td>Ribbon</td><td class="num">≈ 30% < Bloom</td><td>Solves a banded linear system</td><td>In RocksDB; 3–4× build CPU.</td></tr>
+        <tr class="range"><td>SuRF</td><td class="num">≈ 10–14</td><td>Truncated trie, answers <b>ranges</b></td><td>Only if range predicates are in scope.</td></tr>
+      </tbody>
+    </table>
+    <p class="footnote reveal d3">Numbers from the original papers: Bloom 1970; Fan et al. 2014; Graf &amp; Lemire 2020, 2022; Dillinger &amp; Walzer 2021; Zhang et al. SIGMOD 2018. Not yet measured on database blocks; that is the point of the study.</p>
+  </div>
+  <div class="speaker">
+    Since 1970 a lot of better filters appeared. Cuckoo filters support deletes, which we don't need for immutable blocks. XOR and binary fuse filters are static: they need the whole set up front, which fits a block perfectly, and they use roughly 20% less space than Bloom at the same error. The price is a more expensive build. Ribbon is used in RocksDB. And all hash-based filters answer only "is this exact value here?". For ranges you need something like SuRF. These numbers come from the papers; nobody has compared them directly on columnar row groups, and that's what I want to measure.
+  </div>
+</section>
+
+<!-- 5. TRADE-OFF -->
+<section class="slide" id="s5" data-title="Trade-off">
+  <div class="inner">
+    <div class="kicker reveal">04 · What “memory–performance” means here</div>
+    <h2 class="reveal d1">Filter bytes in memory<br>vs. <span class="no">work we don't do</span>.</h2>
+
+    <div class="scale">
+      <div class="card reveal d2">
+        <h3>Cost: memory</h3>
+        <p>The filter's size: bits per key × keys per block. Usually kept resident, so it competes with cache for space.</p>
+        <div class="formula" style="margin-top:1rem">+ probe CPU &nbsp;+ build time</div>
+        <p>Plus a false-positive rate, which means unnecessary reads.</p>
+      </div>
+      <div class="vs reveal d2">vs</div>
+      <div class="card reveal d3">
+        <h3>Benefit: avoided work, by where the block lives</h3>
+        <div class="tier"><div class="bar" style="width:120px"></div><div class="label"><b>Object storage (S3)</b><span>remote GET avoided: biggest win</span></div></div>
+        <div class="tier"><div class="bar" style="width:80px"></div><div class="label"><b>Local disk / SSD</b><span>block I/O avoided</span></div></div>
+        <div class="tier"><div class="bar" style="width:34px; background:var(--maybe)"></div><div class="label"><b>Already in RAM</b><span>decompression + scan CPU avoided</span></div></div>
+      </div>
+    </div>
+
+    <p class="quote reveal d4">The gain is clearest when the filter lets us skip a block <b>on disk</b>. In-memory uses exist too, but they are a different, smaller saving, and we measure them separately.</p>
+  </div>
+  <div class="speaker">
+    One clarification, following Dr Telega's comment. "Memory" here does not mainly mean RAM performance. It means the space the filter takes. On the other side is the work the filter lets us skip, and that depends on where the block lives. On object storage or disk, skipping a block saves real I/O, and that's where Bloom filters shine. If the block is already in RAM, we only save decompression and scanning. That's still useful, but smaller, so I'll report the three cases separately.
+  </div>
+</section>
+
+<!-- 6. PLAN -->
+<section class="slide" id="s6" data-title="Plan">
+  <div class="inner">
+    <div class="kicker reveal">05 · Plan</div>
+    <h2 class="reveal d1">Small, controlled, and stoppable after each step.</h2>
+
+    <div class="steps">
+      <div class="step reveal d1"><div class="n">STEP 1</div><div class="card"><h3>Synthetic columns</h3><p>Control the order (sorted vs shuffled), cardinality, skew, and whether the value is absent but inside min/max.</p></div></div>
+      <div class="step reveal d2"><div class="n">STEP 2</div><div class="card"><h3>Filters per block</h3><p>Bloom / SBBF as the baseline vs <b style="color:var(--text)">binary fuse</b>. XOR as an optional third.</p></div></div>
+      <div class="step reveal d3"><div class="n">STEP 3</div><div class="card"><h3>Measure</h3><p>Bits per key · real false-positive rate · blocks pruned beyond min/max. Later: I/O bytes, probe and build time.</p></div></div>
+      <div class="step reveal d4"><div class="n">STEP 4</div><div class="card"><h3>Real data</h3><p>One column from TPC-H or ClickBench. Equality and IN queries; ranges only if SuRF is added.</p></div></div>
+    </div>
+
+    <div class="split reveal d4">
+      <div class="card"><h3>This topic <small>Jakub</small></h3><p>Filters decide <b style="color:var(--text)">whether</b> a block is read. Compression fixed.</p></div>
+      <div class="card"><h3>Companion topic <small>Filip</small></h3><p>ANS compression decides <b style="color:var(--text)">how expensive</b> a read block is. Filters off.</p></div>
+    </div>
+  </div>
+  <div class="speaker">
+    The plan is deliberately small. First, synthetic columns where I control the data order, the cardinality and the skew. Then, for each block, I build a Bloom filter and a binary fuse filter. I measure three things first: bits per key, the real false-positive rate, and how many blocks are pruned beyond min/max. Only then do I move to real data like TPC-H or ClickBench. This is independent from Filip's topic: my filter decides whether a block is read, and his compression decides how expensive the read is.
+  </div>
+</section>
+
+<!-- 7. HYPOTHESES -->
+<section class="slide" id="s7" data-title="Hypotheses">
+  <div class="inner">
+    <div class="kicker reveal">06 · Expected outcomes (hypotheses, not results)</div>
+    <h2 class="reveal d1">What we expect to see.</h2>
+
+    <div class="reveal d2">
+      <div class="hyp"><span class="id">H1</span><p><b>Shuffled columns:</b> filters prune many blocks that min/max cannot.</p></div>
+      <div class="hyp"><span class="id">H2</span><p><b>Sorted columns:</b> filters add little on top of min/max.</p></div>
+      <div class="hyp"><span class="id">H3</span><p><b>Binary fuse / XOR</b> use fewer bits per key than Bloom at an equal false-positive rate.</p></div>
+      <div class="hyp"><span class="id">H4</span><p>…but are <b>slower to build</b>, which matters for blocks queried rarely.</p></div>
+      <div class="hyp"><span class="id">H5</span><p><b>No single winner</b> across space, build, probe and predicate type.</p></div>
+    </div>
+
+    <div class="reveal d3" style="margin-top:1.6rem">
+      <div class="kicker" style="margin-bottom:0.4rem; color:var(--dim)">Out of scope</div>
+      <div class="out">
+        <span>inventing a new filter</span>
+        <span>compression / ANS</span>
+        <span>declaring a universal winner</span>
+        <span>range filters in iteration 1</span>
+      </div>
+    </div>
+
+    <h2 class="reveal d4" style="margin-top:2.4rem; font-size:clamp(1.5rem,2.4vw,2rem)">Thank you. <span style="color:var(--muted); font-weight:500">Questions?</span></h2>
+  </div>
+  <div class="speaker">
+    To finish, these are hypotheses, not results. I expect filters to help a lot on shuffled columns and very little on sorted ones. I expect binary fuse to be smaller than Bloom but slower to build. And I expect no single winner: the answer will depend on the data and the query. I'm not inventing a new filter and not touching compression, which is Filip's part. Thank you, I'm happy to take questions.
+  </div>
+</section>
+
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  const progress = document.getElementById('progress');
+  const counter = document.getElementById('counter');
+  const notes = document.getElementById('notes');
+  const notesBody = document.getElementById('notes-body');
+  let current = -1;
+
+  function sync() {
+    const mid = scrollY + innerHeight / 2;
+    let idx = slides.findIndex(s => s.offsetTop <= mid && s.offsetTop + s.offsetHeight > mid);
+    if (idx < 0) idx = 0;
+    if (idx === current) return;
+    current = idx;
+    const s = slides[idx];
+    s.classList.add('visible');
+    progress.style.width = ((idx + 1) / slides.length * 100) + '%';
+    counter.textContent = (idx + 1) + ' / ' + slides.length;
+    notesBody.textContent = s.querySelector('.speaker')?.textContent.trim() || '';
+    history.replaceState(null, '', '#' + s.id);
+  }
+
+  history.scrollRestoration = 'manual';
+  const start = location.hash && document.querySelector(location.hash);
+  if (start) {
+    document.documentElement.style.scrollBehavior = 'auto';
+    scrollTo(0, start.offsetTop);
+    document.documentElement.style.scrollBehavior = '';
+  }
+  sync();
+  let ticking = false;
+  addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => { ticking = false; sync(); });
+  });
+
+  const go = i => slides[Math.max(0, Math.min(slides.length - 1, i))].scrollIntoView({ behavior: 'smooth' });
+
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') {
+      if (e.key === 'Enter') document.getElementById(e.shiftKey ? 'qry' : 'ins').click();
+      return;
+    }
+    if (['ArrowDown', 'PageDown', ' ', 'ArrowRight'].includes(e.key)) { e.preventDefault(); go(current + 1); }
+    if (['ArrowUp', 'PageUp', 'ArrowLeft'].includes(e.key)) { e.preventDefault(); go(current - 1); }
+    if (e.key === 'Home') go(0);
+    if (e.key === 'End') go(slides.length - 1);
+    if (e.key === 'n' || e.key === 'N') notes.classList.toggle('open');
+  });
+
+  // title decoration
+  const deco = document.getElementById('deco');
+  for (let i = 0; i < 64; i++) {
+    const s = document.createElement('span');
+    if ([3, 9, 14, 22, 27, 31, 38, 41, 47, 52, 58, 61].includes(i)) s.className = 'on';
+    deco.appendChild(s);
+  }
+
+  // row groups demo
+  const groups = [
+    { name: 'RG 1', min: 0, max: 900, has: false },
+    { name: 'RG 2', min: 0, max: 900, has: false },
+    { name: 'RG 3', min: 0, max: 900, has: true },
+    { name: 'RG 4', min: 0, max: 900, has: false },
+    { name: 'RG 5', min: 0, max: 900, has: false },
+    { name: 'RG 6', min: 0, max: 900, fp: true },
+    { name: 'RG 7', min: 0, max: 900, has: false },
+    { name: 'RG 8', min: 0, max: 900, has: false },
+  ];
+  const rgRow = document.getElementById('rg-row');
+  function renderGroups(mode) {
+    rgRow.innerHTML = '';
+    groups.forEach(g => {
+      const d = document.createElement('div');
+      let verdict, cls;
+      if (mode === 'minmax') { verdict = 'read'; cls = 'read'; }
+      else if (g.has) { verdict = 'read'; cls = 'read'; }
+      else if (g.fp) { verdict = 'read (false +)'; cls = 'read'; }
+      else { verdict = 'skip'; cls = 'skip'; }
+      d.className = 'rg ' + cls;
+      d.innerHTML = `<div class="name">${g.name}</div>min ${g.min}<br>max ${g.max}<div class="verdict ${cls === 'skip' ? 'no' : 'maybe'}">${verdict}</div>`;
+      rgRow.appendChild(d);
+    });
+  }
+  renderGroups('minmax');
+  document.querySelectorAll('#rg-toggle button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#rg-toggle button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    renderGroups(b.dataset.mode);
+  }));
+
+  // bloom filter demo
+  const M = 32, K = 3;
+  let bits = new Array(M).fill(0);
+  let inserted = [];
+  const bitsEl = document.getElementById('bits');
+  const resultEl = document.getElementById('result');
+  const chipsEl = document.getElementById('chips');
+  const keyEl = document.getElementById('key');
+
+  function fnv(str, seed) {
+    let h = 2166136261 ^ seed;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995); h ^= h >>> 15;
+    return h >>> 0;
+  }
+  const positions = key => {
+    const h1 = fnv(key, 0), h2 = (fnv(key, 0x85ebca6b) | 1) >>> 0;
+    const out = [];
+    for (let i = 0; i < K; i++) out.push((h1 + i * h2) % M);
+    return out;
+  };
+
+  function renderBits(probe = [], hit = false) {
+    bitsEl.innerHTML = '';
+    bits.forEach((b, i) => {
+      const d = document.createElement('div');
+      d.className = 'bit' + (b ? ' on' : '');
+      if (probe.includes(i)) d.classList.add(bits[i] ? 'probe-hit' : 'probe-miss');
+      d.innerHTML = `<small>${i}</small>${b}`;
+      bitsEl.appendChild(d);
+    });
+    chipsEl.innerHTML = inserted.map(k => `<span class="chip">${k}</span>`).join('');
+  }
+  function insertKey(k) {
+    if (!k) return;
+    const p = positions(k);
+    p.forEach(i => bits[i] = 1);
+    if (!inserted.includes(k)) inserted.push(k);
+    renderBits(p);
+    resultEl.className = 'result';
+    resultEl.textContent = `inserted "${k}" → set bits ${p.join(', ')}`;
+  }
+
+  function queryKey(k) {
+    if (!k) return;
+    const p = positions(k);
+    const all = p.every(i => bits[i]);
+    renderBits(p);
+    if (!all) {
+      resultEl.className = 'result no';
+      resultEl.textContent = `"${k}" → bits ${p.join(', ')}: a zero found → DEFINITELY NOT in block → skip`;
+    } else if (inserted.includes(k)) {
+      resultEl.className = 'result maybe';
+      resultEl.textContent = `"${k}" → bits ${p.join(', ')}: all set → PROBABLY YES → read block`;
+    } else {
+      resultEl.className = 'result maybe';
+      resultEl.textContent = `"${k}" → bits ${p.join(', ')}: all set, but never inserted → FALSE POSITIVE (extra read)`;
+    }
+  }
+
+  document.getElementById('ins').onclick = () => { insertKey(keyEl.value.trim()); keyEl.value = ''; keyEl.focus(); };
+  document.getElementById('qry').onclick = () => queryKey(keyEl.value.trim());
+  document.getElementById('rst').onclick = () => {
+    bits = new Array(M).fill(0); inserted = [];
+    ['100', '300', '500', '700', '900'].forEach(k => positions(k).forEach(i => bits[i] = 1));
+    inserted = ['100', '300', '500', '700', '900'];
+    renderBits();
+    resultEl.className = 'result';
+    resultEl.textContent = 'Block contains 100, 300, 500, 700, 900. Try querying 501, 500, then 64.';
+  };
+  document.getElementById('rst').click();
+</script>
+</body>
+</html>
