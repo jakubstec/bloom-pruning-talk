@@ -312,6 +312,10 @@
   .tag.prod { background: rgba(52, 211, 166, 0.14); color: var(--no); }
   .tag.study { background: rgba(124, 140, 255, 0.16); color: var(--accent); }
   .footnote { margin-top: 1rem; font-size: 0.78rem; color: var(--dim); }
+  .name-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.8rem; list-style: none; }
+  .name-list li { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 1.35rem 1.3rem; font-size: 1.45rem; font-weight: 650; }
+  .name-list li.compare { border-color: var(--accent); }
+  .name-list small { display: block; margin-top: 0.4rem; font: 600 0.72rem var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
 
   /* ---------- trade-off ---------- */
   .scale { display: grid; grid-template-columns: 1fr auto 1fr; gap: 1.5rem; align-items: stretch; margin-top: 1.6rem; }
@@ -407,7 +411,7 @@
   }
 
   @media (max-width: 900px) {
-    .g2, .g3, .demo, .scale, .steps, .split { grid-template-columns: 1fr; }
+    .g2, .g3, .demo, .scale, .steps, .split, .name-list { grid-template-columns: 1fr; }
     .vs { justify-self: center; }
   }
 </style>
@@ -426,7 +430,7 @@
     <p class="lead reveal d2" style="margin-top:1.4rem">Investigating memory–performance trade-offs of Bloom filters and alternative approximate membership structures for database block pruning.</p>
     <div class="bits-deco reveal d3" id="deco"></div>
     <div class="title-meta reveal d4">
-      <div><b>Jakub Stec</b>Author</div>
+      <div><b>Jakub Steć</b>Author</div>
       <div><b>Dr Henryk Telega</b>Supervisor</div>
     </div>
   </div>
@@ -499,22 +503,16 @@
 <section class="slide" id="s4" data-title="Alternatives">
   <div class="inner">
     <div class="kicker reveal">03 · Modern alternatives</div>
-    <h2 class="reveal d1">Bloom isn't the only filter. Newer ones<br>trade <span class="acc">build cost</span> for <span class="acc">space</span>.</h2>
-
-    <table class="reveal d2">
-      <thead>
-        <tr><th>Structure</th><th>Space (bits / key)</th><th>Idea</th><th>Fit for per-block filters</th></tr>
-      </thead>
-      <tbody>
-        <tr class="baseline"><td>Bloom / SBBF <span class="tag prod">PRODUCTION</span></td><td class="num">≈ 10 @ 1%</td><td>k bits in an array; blocked = one cache line</td><td>Cheap build, cheap probe. The baseline.</td></tr>
-        <tr><td>Cuckoo</td><td class="num">log₂(1/ε) + ~3</td><td>Fingerprints in two candidate buckets</td><td>Supports delete, which immutable blocks don't need.</td></tr>
-        <tr><td>XOR <span class="tag study">STUDY</span></td><td class="num">9.84 @ 0.39%</td><td>3 slots XOR to the key's fingerprint</td><td>Static, smaller; build is more expensive.</td></tr>
-        <tr><td>Binary fuse <span class="tag study">STUDY</span></td><td class="num">≈ 9.0 @ 0.39%</td><td>XOR with segmented, local hashing</td><td>Main candidate vs Bloom. Gains shrink on small sets.</td></tr>
-        <tr><td>Ribbon</td><td class="num">≈ 30% < Bloom</td><td>Solves a banded linear system</td><td>In RocksDB; 3–4× build CPU.</td></tr>
-        <tr class="range"><td>SuRF</td><td class="num">≈ 10–14</td><td>Truncated trie, answers <b>ranges</b></td><td>Only if range predicates are in scope.</td></tr>
-      </tbody>
-    </table>
-    <p class="footnote reveal d3">Numbers from the original papers: Bloom 1970; Fan et al. 2014; Graf &amp; Lemire 2020, 2022; Dillinger &amp; Walzer 2021; Zhang et al. SIGMOD 2018. Not yet measured on database blocks; that is the point of the study.</p>
+    <h2 class="reveal d1">Bloom isn't the only filter.</h2>
+    <ul class="name-list reveal d2">
+      <li class="compare">Bloom<small>This project</small></li>
+      <li>Cuckoo</li>
+      <li>XOR<small>Optional</small></li>
+      <li class="compare">Binary fuse<small>This project</small></li>
+      <li>Ribbon</li>
+      <li>SuRF</li>
+    </ul>
+    <p class="lead reveal d3" style="margin-top:1.6rem">The comparison is Bloom against binary fuse. The other names are context, not measurements.</p>
   </div>
 </section>
 
@@ -555,11 +553,6 @@
       <div class="step reveal d2"><div class="n">STEP 2</div><div class="card"><h3>Filters per block</h3><p>Bloom / SBBF as the baseline vs <b style="color:var(--text)">binary fuse</b>. XOR as an optional third.</p></div></div>
       <div class="step reveal d3"><div class="n">STEP 3</div><div class="card"><h3>Measure</h3><p>Bits per key · real false-positive rate · blocks pruned beyond min/max. Later: I/O bytes, probe and build time.</p></div></div>
       <div class="step reveal d4"><div class="n">STEP 4</div><div class="card"><h3>Real data</h3><p>One column from TPC-H or ClickBench. Equality and IN queries; ranges only if SuRF is added.</p></div></div>
-    </div>
-
-    <div class="split reveal d4">
-      <div class="card"><h3>This topic <small>Jakub</small></h3><p>Filters decide <b style="color:var(--text)">whether</b> a block is read. Compression fixed.</p></div>
-      <div class="card"><h3>Companion topic <small>Filip</small></h3><p>ANS compression decides <b style="color:var(--text)">how expensive</b> a read block is. Filters off.</p></div>
     </div>
   </div>
 </section>
