@@ -396,26 +396,6 @@
     color: var(--muted);
   }
 
-  .notes {
-    position: fixed;
-    left: 50%;
-    bottom: 1rem;
-    transform: translateX(-50%) translateY(140%);
-    width: min(900px, 92vw);
-    background: rgba(18, 21, 28, 0.97);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 1rem 1.3rem;
-    font-size: 0.95rem;
-    color: var(--text);
-    z-index: 30;
-    transition: transform 0.35s ease;
-    backdrop-filter: blur(8px);
-  }
-  .notes.open { transform: translateX(-50%) translateY(0); }
-  .notes .t { font: 600 0.7rem var(--mono); letter-spacing: 0.15em; color: var(--maybe); margin-bottom: 0.4rem; }
-  .speaker { display: none; }
-
   @media (max-height: 780px) {
     .slide { padding: 4vh 6vw; }
     h2 { margin-bottom: 0.8rem; }
@@ -433,8 +413,7 @@
 
 <div class="progress" id="progress"></div>
 <div class="counter" id="counter">1 / 7</div>
-<div class="hint"><kbd>↓</kbd> <kbd>↑</kbd> navigate &nbsp; <kbd>N</kbd> notes</div>
-<div class="notes" id="notes"><div class="t">SPEAKER NOTES</div><div id="notes-body"></div></div>
+<div class="hint"><kbd>↓</kbd> <kbd>↑</kbd> navigate</div>
 
 <!-- 1. TITLE -->
 <section class="slide" id="s1" data-title="Title">
@@ -448,9 +427,6 @@
       <div><b>Dr Henryk Telega</b>Supervisor</div>
       <div><b>Companion topic</b>ANS compression (Filip)</div>
     </div>
-  </div>
-  <div class="speaker">
-    Hi. My topic is about making analytical queries skip data they don't need. Specifically: how much memory we should spend on small probabilistic filters, like Bloom filters, so that a database can avoid reading whole blocks of a table. This is a preliminary study. Today I'll show the problem, how the structures work, what exactly the trade-off is, and the plan.
   </div>
 </section>
 
@@ -476,9 +452,6 @@
       <div class="card"><h3>Min/max is weak here</h3><p>High-cardinality columns that are not sorted: every block covers almost the full range.</p></div>
       <div class="card"><h3>Real effect</h3><p>DuckDB example, value absent but inside min/max: <span class="mono" style="color:var(--text)">0.1 s → 0.002 s</span> with a 47-byte filter per row group.</p></div>
     </div>
-  </div>
-  <div class="speaker">
-    Analytical databases store data in blocks, for example row groups in Parquet. For every block they keep the minimum and maximum value. If I look for user 501 and a block's range is 600 to 900, I skip it without reading. But if the column is shuffled, every block has a range like 0 to 900, so min/max says "maybe" everywhere and we read everything. [click toggle] With a Bloom filter per block, most blocks answer "definitely not here" and we skip them. In a DuckDB example this took a query from 0.1 seconds to 2 milliseconds.
   </div>
 </section>
 
@@ -516,9 +489,6 @@
       </div>
     </div>
   </div>
-  <div class="speaker">
-    A Bloom filter is just an array of bits and a few hash functions. To insert a value I hash it k times and set those bits. To check a value, I look at the same bits: if any of them is zero, the value is definitely not in the block. If all are one, it's probably there. Let me show it. [query 501: definitely not; query 500: probably yes; query 64: false positive, an extra read but still a correct answer] Because bits are never cleared, there are no false negatives, which is exactly what pruning needs. The cost is about ten bits per value for one percent false positives. Parquet uses a cache-friendly variant called the split block Bloom filter.
-  </div>
 </section>
 
 <!-- 4. ALTERNATIVES -->
@@ -541,9 +511,6 @@
       </tbody>
     </table>
     <p class="footnote reveal d3">Numbers from the original papers: Bloom 1970; Fan et al. 2014; Graf &amp; Lemire 2020, 2022; Dillinger &amp; Walzer 2021; Zhang et al. SIGMOD 2018. Not yet measured on database blocks; that is the point of the study.</p>
-  </div>
-  <div class="speaker">
-    Since 1970 a lot of better filters appeared. Cuckoo filters support deletes, which we don't need for immutable blocks. XOR and binary fuse filters are static: they need the whole set up front, which fits a block perfectly, and they use roughly 20% less space than Bloom at the same error. The price is a more expensive build. Ribbon is used in RocksDB. And all hash-based filters answer only "is this exact value here?". For ranges you need something like SuRF. These numbers come from the papers; nobody has compared them directly on columnar row groups, and that's what I want to measure.
   </div>
 </section>
 
@@ -571,9 +538,6 @@
 
     <p class="quote reveal d4">The gain is clearest when the filter lets us skip a block <b>on disk</b>. In-memory uses exist too, but they are a different, smaller saving, and we measure them separately.</p>
   </div>
-  <div class="speaker">
-    One clarification, following Dr Telega's comment. "Memory" here does not mainly mean RAM performance. It means the space the filter takes. On the other side is the work the filter lets us skip, and that depends on where the block lives. On object storage or disk, skipping a block saves real I/O, and that's where Bloom filters shine. If the block is already in RAM, we only save decompression and scanning. That's still useful, but smaller, so I'll report the three cases separately.
-  </div>
 </section>
 
 <!-- 6. PLAN -->
@@ -593,9 +557,6 @@
       <div class="card"><h3>This topic <small>Jakub</small></h3><p>Filters decide <b style="color:var(--text)">whether</b> a block is read. Compression fixed.</p></div>
       <div class="card"><h3>Companion topic <small>Filip</small></h3><p>ANS compression decides <b style="color:var(--text)">how expensive</b> a read block is. Filters off.</p></div>
     </div>
-  </div>
-  <div class="speaker">
-    The plan is deliberately small. First, synthetic columns where I control the data order, the cardinality and the skew. Then, for each block, I build a Bloom filter and a binary fuse filter. I measure three things first: bits per key, the real false-positive rate, and how many blocks are pruned beyond min/max. Only then do I move to real data like TPC-H or ClickBench. This is independent from Filip's topic: my filter decides whether a block is read, and his compression decides how expensive the read is.
   </div>
 </section>
 
@@ -625,17 +586,12 @@
 
     <h2 class="reveal d4" style="margin-top:2.4rem; font-size:clamp(1.5rem,2.4vw,2rem)">Thank you. <span style="color:var(--muted); font-weight:500">Questions?</span></h2>
   </div>
-  <div class="speaker">
-    To finish, these are hypotheses, not results. I expect filters to help a lot on shuffled columns and very little on sorted ones. I expect binary fuse to be smaller than Bloom but slower to build. And I expect no single winner: the answer will depend on the data and the query. I'm not inventing a new filter and not touching compression, which is Filip's part. Thank you, I'm happy to take questions.
-  </div>
 </section>
 
 <script>
   const slides = [...document.querySelectorAll('.slide')];
   const progress = document.getElementById('progress');
   const counter = document.getElementById('counter');
-  const notes = document.getElementById('notes');
-  const notesBody = document.getElementById('notes-body');
   let current = -1;
 
   function sync() {
@@ -648,7 +604,6 @@
     s.classList.add('visible');
     progress.style.width = ((idx + 1) / slides.length * 100) + '%';
     counter.textContent = (idx + 1) + ' / ' + slides.length;
-    notesBody.textContent = s.querySelector('.speaker')?.textContent.trim() || '';
     history.replaceState(null, '', '#' + s.id);
   }
 
@@ -678,7 +633,6 @@
     if (['ArrowUp', 'PageUp', 'ArrowLeft'].includes(e.key)) { e.preventDefault(); go(current - 1); }
     if (e.key === 'Home') go(0);
     if (e.key === 'End') go(slides.length - 1);
-    if (e.key === 'n' || e.key === 'N') notes.classList.toggle('open');
   });
 
   // title decoration
