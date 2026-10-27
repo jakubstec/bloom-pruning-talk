@@ -426,7 +426,7 @@
 <!-- 1. TITLE -->
 <section class="slide" id="s1" data-title="Title">
   <div class="inner">
-    <div class="kicker reveal">Research topic · preliminary</div>
+    <div class="kicker reveal">Research topic</div>
     <h1 class="reveal d1">Efficient Database Query Filtering<br>with <span class="acc">Bloom Filters</span> and Modern<br>Probabilistic Data Structures</h1>
     <p class="lead reveal d2" style="margin-top:1.4rem">Investigating memory–performance trade-offs of Bloom filters and alternative approximate membership structures for database block pruning.</p>
     <div class="bits-deco reveal d3" id="deco"></div>
@@ -567,9 +567,9 @@
     <div class="reveal d2">
       <div class="hyp"><span class="id">H1</span><p><b>Shuffled columns:</b> filters prune many blocks that min/max cannot.</p></div>
       <div class="hyp"><span class="id">H2</span><p><b>Sorted columns:</b> filters add little on top of min/max.</p></div>
-      <div class="hyp"><span class="id">H3</span><p><b>Binary fuse / XOR</b> use fewer bits per key than Bloom at an equal false-positive rate.</p></div>
-      <div class="hyp"><span class="id">H4</span><p>…but are <b>slower to build</b>, which matters for blocks queried rarely.</p></div>
-      <div class="hyp"><span class="id">H5</span><p><b>No single winner</b> across space, build, probe and predicate type.</p></div>
+      <div class="hyp"><span class="id">H3</span><p><b>Same bits per key:</b> binary fuse skips more blocks than Bloom, because it is wrong less often.</p></div>
+      <div class="hyp"><span class="id">H4</span><p><b>Small blocks:</b> that gap may disappear. A block has hundreds or thousands of distinct values. The papers used about a million keys.</p></div>
+      <div class="hyp"><span class="id">H5</span><p><b>Build time:</b> binary fuse is slower to build, which matters when a block is queried only once.</p></div>
     </div>
 
     <div class="reveal d3" style="margin-top:1.6rem">
