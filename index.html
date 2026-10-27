@@ -165,7 +165,8 @@
   .rg .name { color: var(--text); font-weight: 600; margin-bottom: 0.4rem; }
   .rg.skip { border-color: var(--no); background: rgba(52, 211, 166, 0.08); }
   .rg.read { border-color: var(--maybe); background: rgba(245, 184, 74, 0.08); }
-  .rg .verdict { margin-top: 0.5rem; font-weight: 600; }
+  .rg .verdict { margin-top: 0.35rem; font-weight: 600; }
+  .rg .why { margin-top: 0.45rem; color: var(--text); }
 
   .query-pill {
     display: inline-block;
@@ -673,13 +674,30 @@
     rgRow.innerHTML = '';
     blocks.forEach(g => {
       const d = document.createElement('div');
-      let verdict, cls;
-      const outside = mode === 'sorted' && !g.has;
-      if (outside || (mode === 'bloom' && !g.has && !g.fp)) { verdict = 'skip'; cls = 'skip'; }
-      else if (mode === 'bloom' && g.fp) { verdict = 'read (false +)'; cls = 'read'; }
-      else { verdict = 'read'; cls = 'read'; }
+      let why, verdict, cls;
+      if (mode === 'sorted') {
+        why = g.has ? '501 is inside' : '501 is outside';
+        verdict = g.has ? 'read' : 'skip';
+        cls = g.has ? 'read' : 'skip';
+      } else if (mode === 'shuffled') {
+        why = '501 could be here';
+        verdict = 'read';
+        cls = 'read';
+      } else if (g.has) {
+        why = '501 is in here';
+        verdict = 'read';
+        cls = 'read';
+      } else if (g.fp) {
+        why = '501 is absent';
+        verdict = 'read, filter wrong';
+        cls = 'read';
+      } else {
+        why = 'filter: not here';
+        verdict = 'skip';
+        cls = 'skip';
+      }
       d.className = 'rg ' + cls;
-      d.innerHTML = `<div class="name">${g.name}</div>min ${g.min}<br>max ${g.max}<div class="verdict ${cls === 'skip' ? 'no' : 'maybe'}">${verdict}</div>`;
+      d.innerHTML = `<div class="name">${g.name}</div>min ${g.min}<br>max ${g.max}<div class="why">${why}</div><div class="verdict ${cls === 'skip' ? 'no' : 'maybe'}">${verdict}</div>`;
       rgRow.appendChild(d);
     });
     rgCaption.textContent = captions[mode];
